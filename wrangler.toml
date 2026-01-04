@@ -1,0 +1,15 @@
+name = "cf_ai_edge_interview_coach"
+main = "src/worker.ts"
+compatibility_date = "2025-12-15"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "SESSION_DO"
+class_name = "SessionDO"
+
+[[workflows]]
+name = "cf-ai-report-workflow"
+binding = "REPORT_WORKFLOW"
+class_name = "ReportWorkflow"
