@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Edge Interview Coach (Cloudflare AI)</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        margin: 0;
+        background: #f6f7f9;
+      }
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      h2 {
+        margin-top: 0;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      button {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f0f0f0;
+      }
+      input {
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        flex: 1;
+        min-width: 240px;
+      }
+      .status {
+        font-size: 12px;
+        color: #555;
+      }
+      .chat {
+        background: #fff;
+        border-radius: 12px;
+        padding: 12px;
+        min-height: 420px;
+        border: 1px solid #e3e3e3;
+        overflow-y: auto;
+      }
+      .msg {
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        max-width: 75%;
+        white-space: pre-wrap;
+        line-height: 1.35;
+      }
+      .user {
+        background: #e6efff;
+        margin-left: auto;
+      }
+      .assistant {
+        background: #f8f8f8;
+        border: 1px solid #e6e6e6;
+      }
+      pre {
+        background: #f8f8f8;
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid #e6e6e6;
+        overflow-x: auto;
+      }
+      .footer {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h2>Edge Interview Coach</h2>
+
+      <div class="controls">
+        <button id="newSession">New session</button>
+        <button id="reportBtn">Generate report</button>
+        <div class="status" id="status">Connecting…</div>
+      </div>
+
+      <div class="chat" id="chat"></div>
+
+      <div class="controls" style="margin-top: 10px;">
+        <input
+          id="input"
+          placeholder="Ask an interview question (e.g. derive Black–Scholes PDE)"
+        />
+        <button id="send">Send</button>
+      </div>
+
+      <div class="footer">
+        Session memory is preserved via a Cloudflare Durable Object.
+      </div>
+    </div>
+
+    <script>
+      // If deployed separately, set this to your Worker URL:
+      // window.WORKER_ORIGIN = "https://your-worker.workers.dev";
+      const WORKER_ORIGIN = window.WORKER_ORIGIN || window.location.origin;
+
+      const chat = document.getElementById("chat");
+      const input = document.getElementById("input");
+      const statusEl = document.getElementById("status");
+
+      const btnSend = document.getElementById("send");
+      const btnNew = document.getElementById("newSession");
+      const btnReport = document.getElementById("reportBtn");
+
+      let sessionId = null;
+      let ws = null;
+
+      function addMessage(type, text) {
+        const div = document.createElement("div");
+        div.className = `msg ${type}`;
+        div.textContent = text;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      function addMarkdown(md) {
+        const pre = document.createElement("pre");
+        pre.textContent = md;
+        chat.appendChild(pre);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      async function createSession() {
+        const res = await fetch(`${WORKER_ORIGIN}/api/new-session`);
+        const data = await res.json();
+        sessionId = data.sessionId;
+        connect();
+      }
+
+      function connect() {
+        if (ws) ws.close();
+        const wsUrl = `${WORKER_ORIGIN.replace("http", "ws")}/session/${sessionId}/ws`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => (statusEl.textContent = `Connected (session ${sessionId})`);
+        ws.onclose = () => (statusEl.textContent = "Disconnected");
+        ws.onerror = () => (statusEl.textContent = "WebSocket error");
+
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "assistant") addMessage("assistant", msg.text);
+          if (msg.type === "report_ready") addMarkdown(msg.markdown);
+          if (msg.type === "error") addMessage("assistant", "Error: " + msg.message);
+        };
+      }
+
+      function send() {
+        const text = input.value.trim();
+        if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+        addMessage("user", text);
+        ws.send(JSON.stringify({ type: "user", text }));
+        input.value = "";
+      }
+
+      async function generateReport() {
+        if (!sessionId) return;
+        addMessage("assistant", "Generating post-session report…");
+        await fetch(`${WORKER_ORIGIN}/api/report?session=${sessionId}`, {
+          method: "POST",
+        });
+      }
+
+      btnSend.onclick = send;
+      input.addEventListener("keydown", (e) => e.key === "Enter" && send());
+      btnNew.onclick = createSession;
+      btnReport.onclick = generateReport;
+
+      // Auto-start
+      createSession();
+    </script>
+  </body>
+</html>
